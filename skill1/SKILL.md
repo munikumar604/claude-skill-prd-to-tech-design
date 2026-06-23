@@ -1,6 +1,6 @@
 ---
 name: prd-to-tech-design
-description: Use when the user needs to create, update, or review a Technical Design Document (TDD) based on a Product Requirements Document (PRD) from Notion. Triggers on phrases like "tech design", "technical design", "TDD", "design doc", "architecture doc", "create TDD from PRD", "analyze PRD", "Notion to design", "version mapping PRD TDD", or when the user mentions generating diagrams, FigJam, or architecture documentation from product requirements. Also triggers when the user mentions analyzing a GitHub repository for architecture decisions or creating implementation plans from specifications.
+description: Use when the user needs to create, update, or review a Technical Design Document (TDD) based on a Product Requirements Document (PRD) from Notion. Triggers on phrases like "tech design", "technical design", "TDD", "design doc", "architecture doc", "create TDD from PRD", "analyze PRD", "Notion to design", "version mapping PRD TDD", or when the user mentions generating diagrams, Figjam, or architecture documentation from product requirements. Also triggers when the user mentions analyzing a GitHub repository for architecture decisions or creating implementation plans from specifications.
 disable-model-invocation: false
 allowed-tools: Read Edit Bash Web Search Grep View
 ---
@@ -9,15 +9,20 @@ allowed-tools: Read Edit Bash Web Search Grep View
 
 ## Overview
 
-This skill orchestrates a complete pipeline that reads a Product Requirements Document (PRD) from Notion (with version tracking), analyzes the target GitHub repository for architecture context, generates a versioned Technical Design Document (TDD), and produces FigJam-compatible architecture diagrams. Every TDD is permanently mapped 1:1 to its parent PRD version.
+This skill orchestrates a complete pipeline that:
+1. **Reads a Product Requirements Document (PRD)** from Notion (with version tracking)
+2. **Analyzes the target GitHub repository** for architecture context
+3. **Generates a versioned Technical Design Document (TDD)** as a **Notion page** with rich content
+4. **Creates architecture diagrams** in **FigJam** (via Excalidraw import + Figma API file creation)
+5. **Maintains a permanent 1:1 version mapping** between PRD versions and TDD versions
 
 ## When to Use
 
 - User asks to create a technical design from a PRD
 - User mentions Notion PRD + GitHub repo analysis
-- User needs architecture diagrams (system, data model, API flow, sequence)
+- User needs architecture diagrams in FigJam
 - User explicitly mentions version mapping between PRD and TDD
-- User wants FigJam diagrams generated from requirements
+- User wants TDD stored in Notion (not just local markdown)
 - User says "design doc", "tech spec", "architecture document", "implementation plan"
 
 ## When NOT to Use
@@ -37,16 +42,17 @@ Follow these phases in strict order. Do not skip phases. Ask the user for missin
 
 **Required Environment Variables** (check before proceeding):
 ```
-NOTION_TOKEN          # Notion integration token
-NOTION_DATABASE_ID    # PRD database ID
+NOTION_TOKEN          # Notion integration token (read + write)
+NOTION_PRD_DATABASE_ID   # PRD source database ID
+NOTION_TDD_DATABASE_ID   # TDD destination database ID (must exist in Notion)
 GITHUB_TOKEN          # GitHub personal access token (classic or fine-grained)
-FIGMA_TOKEN           # Figma personal access token (optional, for auto-upload)
+FIGMA_TOKEN           # Figma personal access token (for creating FigJam files)
 ```
 
 **Required User Inputs** (prompt if missing):
 1. Notion PRD URL or PRD ID
 2. Target GitHub repository URL + branch/commit
-3. Output directory for artifacts (default: `./tech-designs/`)
+3. Whether to auto-create TDD in Notion (requires NOTION_TDD_DATABASE_ID)
 4. Whether to auto-create FigJam file (requires FIGMA_TOKEN)
 
 If any required input is missing, ask the user: "I need [X] to proceed. Please provide it or set the environment variable."
@@ -90,8 +96,7 @@ If any required input is missing, ask the user: "I need [X] to proceed. Please p
         "priority": "P0",
         "category": "Functional",
         "description": "...",
-        "acceptance_criteria": ["..."],
-        "linked_stories": ["US-001"]
+        "acceptance_criteria": ["..."]
       }
     ],
     "dependencies": ["PRD-038: Auth Service"],
@@ -193,9 +198,9 @@ find . -path "*/api/*" -name "*.ts" -o -path "*/routes/*" -name "*.ts" | head -2
 
 ---
 
-### Phase 3: Generate Versioned Technical Design Document
+### Phase 3: Generate Technical Design Document in Notion
 
-**Objective**: Produce a complete TDD mapped 1:1 to the PRD version.
+**Objective**: Produce a complete TDD as a **Notion page** mapped 1:1 to the PRD version.
 
 **TDD Naming Convention**:
 ```
@@ -203,204 +208,175 @@ TDD-[PRD_ID]-v[X.Y.Z] (PRD v[A.B.C])
 Example: TDD-042-v1.0.0 (PRD v2.1.0)
 ```
 
-**TDD Template** (use `templates/tdd-template.md`):
+**Notion TDD Database Requirements**:
+The user must have a Notion database with these properties:
+- `Name` (Title) — TDD title
+- `Version` (Rich Text or Select) — TDD version
+- `PRD Version` (Rich Text) — Parent PRD version
+- `Status` (Select) — Draft / In Review / Approved / Implemented
+- `PRD` (Relation) — Link to parent PRD page
+- `GitHub Repo` (URL) — Repository URL
+- `FigJam` (URL) — FigJam diagram link
+- `Author` (People) — Document author
+- `Created` (Date) — Creation date
+- `Last Updated` (Date) — Last update date
 
-```markdown
-# Technical Design Document: {Feature Name}
+**Steps**:
+1. Use `scripts/notion-tdd-creator.py` to create a new page in the TDD database
+2. Populate the page with rich content blocks:
+   - Headings (H1, H2, H3)
+   - Paragraphs
+   - Tables (requirements mapping, decisions, risks)
+   - Code blocks (API specs, schema definitions)
+   - Bulleted/numbered lists
+   - Callouts (for warnings, important notes)
+   - Dividers
+3. Add the `Version` property to the page
+4. Link back to the parent PRD using a Relation property or inline link
+5. Set initial `Status` to "Draft"
 
-## Document Metadata
-| Field | Value |
-|-------|-------|
-| **TDD ID** | TDD-{PRD_ID}-v{X.Y.Z} |
-| **TDD Version** | {X.Y.Z} |
-| **Parent PRD** | [{PRD_ID}]({notion_url}) v{A.B.C} |
-| **Status** | Draft → In Review → Approved → Implemented |
-| **Created** | {date} |
-| **Last Updated** | {date} |
-| **Author** | Claude / {user} |
-| **Reviewers** | TBD |
+**TDD Content Structure in Notion**:
 
-## Version History
-| TDD Version | PRD Version | Date | Author | Change Summary |
-|-------------|-------------|------|--------|----------------|
-| 1.0.0 | 2.1.0 | {date} | Claude | Initial design |
+```
+📄 TDD-042-v1.0.0 (PRD v2.1.0)
+│
+├── 📋 Document Metadata (Table block)
+│   ├── TDD ID: TDD-042-v1.0.0
+│   ├── TDD Version: 1.0.0
+│   ├── Parent PRD: [PRD-042 v2.1.0] (linked)
+│   ├── Status: Draft
+│   ├── Created: 2026-06-23
+│   └── Author: Claude
+│
+├── 📜 Version History (Table block)
+│   ├── TDD v1.0.0 | PRD v2.1.0 | 2026-06-23 | Initial design
+│
+├── 📝 1. Executive Summary
+├── 📝 2. PRD Requirements Mapping (Table)
+│   ├── REQ-001 | Description | Technical Approach | Status | Effort
+├── 🏗️ 3. System Architecture
+│   ├── 3.1 High-Level Description
+│   ├── 3.2 Component Diagram → [FigJam link]
+│   └── 3.3 Data Flow
+├── 🗄️ 4. Data Model
+│   ├── 4.1 ERD → [FigJam link]
+│   ├── 4.2 New/Modified Entities (Code block)
+│   └── 4.3 Migration Plan
+├── 🔌 5. API Design
+│   ├── 5.1 REST/GraphQL Schema (Code block)
+│   ├── 5.2 Auth & Authorization
+│   └── 5.3 Rate Limiting
+├── 📅 6. Implementation Plan (Table)
+│   ├── Phase | Deliverable | Owner | Duration | Dependencies
+├── 🧪 7. Testing Strategy
+├── ⚙️ 8. Operational Considerations
+│   ├── 8.1 Monitoring & Alerting
+│   ├── 8.2 Rollback Plan
+│   └── 8.3 Security Considerations
+├── ❓ 9. Open Questions & Risks (Table)
+│   ├── ID | Question/Risk | Impact | Mitigation | Owner
+└── 📎 10. Appendix
+    ├── 10.1 Glossary
+    ├── 10.2 References
+    └── 10.3 GitHub Analysis Summary
+```
+
+**Version Delta Section** (if updating existing TDD):
+When a PRD version change is detected, prepend a Delta section at the top:
+
+```
+⚠️ Delta from TDD v{old} → v{new}
+Triggered by: PRD v{old_prd} → v{new_prd} ({change_type})
+
+Added:
+• {new requirements and their technical approaches}
+
+Modified:
+• {changed requirements and updated approaches}
+
+Removed:
+• {dropped requirements}
+
+Architecture Changes:
+• {any structural changes to the design}
+```
+
+**Output Artifacts**:
+- Notion TDD page URL
+- Local backup: `TDD-{PRD_ID}-v{X.Y.Z}.md` (for git/version control)
 
 ---
 
-## 1. Executive Summary
-{2-3 paragraphs summarizing what we're building and why}
+### Phase 4: Create Design Diagrams in FigJam
 
-## 2. PRD Requirements Mapping
+**Objective**: Produce architecture diagrams as **FigJam files**.
 
-| PRD Req ID | Requirement | Technical Approach | Status | Est. Effort |
-|------------|-------------|-------------------|--------|-------------|
-| REQ-001 | {description} | {approach} | Designed | 3d |
+**FigJam File Creation Strategy**:
 
-### 2.1 Out of Scope (from PRD)
-{List explicitly excluded items}
+Since FigJam's REST API cannot add shapes programmatically, use this hybrid approach:
 
-## 3. System Architecture
-
-### 3.1 High-Level Architecture
-{Describe the system at 10,000ft}
-
-### 3.2 Component Diagram
-{Reference to generated diagram — see Phase 4}
-
-### 3.3 Data Flow
-{Describe how data moves through the system}
-
-## 4. Data Model
-
-### 4.1 Entity Relationship Diagram
-{Reference to generated ERD}
-
-### 4.2 New / Modified Entities
+**Step 1: Create FigJam file via Figma API**
+```bash
+curl -X POST https://api.figma.com/v1/files   -H "X-Figma-Token: $FIGMA_TOKEN"   -H "Content-Type: application/json"   -d '{"name": "TDD-042-v1.0.0 System Architecture", "editor_type": "figjam"}'
 ```
-{Schema definitions in code blocks}
-```
+This returns a `file_key` and `file_url`.
 
-### 4.3 Migration Plan
-{Step-by-step migration strategy}
-
-## 5. API Design
-
-### 5.1 REST Endpoints / GraphQL Schema
-```
-{Endpoint definitions with request/response examples}
-```
-
-### 5.2 Authentication & Authorization
-{How access is controlled}
-
-### 5.3 Rate Limiting & Validation
-{Constraints and guards}
-
-## 6. Implementation Plan
-
-### 6.1 Phase Breakdown
-| Phase | Deliverable | Owner | Duration | Dependencies |
-|-------|-------------|-------|----------|--------------|
-| 1 | DB migration + models | TBD | 2d | None |
-| 2 | API implementation | TBD | 3d | Phase 1 |
-| 3 | Frontend integration | TBD | 2d | Phase 2 |
-| 4 | Testing & QA | TBD | 2d | Phase 3 |
-
-### 6.2 Key Decisions & Trade-offs
-| Decision | Options Considered | Chosen | Rationale |
-|----------|-------------------|--------|-----------|
-| Sync vs Async | Sync API, Async job | Async job | PRD requires large file support |
-
-## 7. Testing Strategy
-
-### 7.1 Unit Tests
-{What to unit test}
-
-### 7.2 Integration Tests
-{API contract tests}
-
-### 7.3 E2E Tests
-{User journey tests}
-
-### 7.4 Performance Tests
-{Load testing approach}
-
-## 8. Operational Considerations
-
-### 8.1 Monitoring & Alerting
-{Metrics, dashboards, alerts}
-
-### 8.2 Rollback Plan
-{How to revert if something goes wrong}
-
-### 8.3 Security Considerations
-{Threat model, mitigations}
-
-## 9. Open Questions & Risks
-
-| ID | Question / Risk | Impact | Mitigation | Owner |
-|----|----------------|--------|------------|-------|
-| R1 | Can we handle 10k concurrent exports? | High | Load test before launch | TBD |
-
-## 10. Appendix
-
-### 10.1 Glossary
-### 10.2 References
-### 10.3 GitHub Analysis Summary
-{Embed key findings from Phase 2}
-```
-
-**Version Delta Generation** (if updating existing TDD):
-When a PRD version change is detected, generate a `DELTA` section at the top:
-
-```markdown
-## Delta from TDD v{old} → v{new}
-**Triggered by**: PRD v{old_prd} → v{new_prd} ({change_type})
-
-### Added
-- {new requirements and their technical approaches}
-
-### Modified
-- {changed requirements and updated approaches}
-
-### Removed
-- {dropped requirements}
-
-### Architecture Changes
-- {any structural changes to the design}
-```
-
-**Output Artifact**: `TDD-{PRD_ID}-v{X.Y.Z}.md`
-
----
-
-### Phase 4: Generate Architecture Diagrams
-
-**Objective**: Produce FigJam-compatible visual artifacts.
-
-**Diagram Types to Generate**:
-
-1. **System Architecture Diagram** — Components, services, external dependencies
-2. **Data Model / ERD** — Entities, relationships, cardinalities
-3. **API Flow / Sequence Diagram** — Request lifecycle, service interactions
-4. **State Machine** — Feature states and transitions
-5. **Implementation Timeline** — Gantt-style phase breakdown
-
-**Generation Strategy**:
-
-Since FigJam does not have a public API for programmatic creation, use this approach:
-
-**Primary**: Generate diagrams in **Excalidraw** format (`.excalidraw` files) — these import directly into FigJam via copy-paste or file import. Excalidraw is natively supported by FigJam.
-
-**Secondary**: Generate **Mermaid** diagrams for inline documentation. Mermaid renders in GitHub, Notion, and most markdown viewers.
-
-**Tertiary**: Generate **SVG** exports for static embedding.
-
-**Diagram Content Rules**:
-- Use consistent color coding:
+**Step 2: Generate Excalidraw diagram files**
+Use `scripts/diagram-generator.py` to create `.excalidraw` files with:
+- Version watermark: `TDD v{X.Y.Z} | PRD v{A.B.C}`
+- Consistent color coding:
   - 🟦 Existing systems (blue)
   - 🟩 New components (green)
   - 🟨 External services (yellow)
   - 🟥 Data stores (red)
   - ⬜ User/client (white)
-- Include version watermark: `TDD v{X.Y.Z} | PRD v{A.B.C}`
-- Label all connections with protocol/method (HTTP, gRPC, WebSocket, etc.)
+- Labeled connections with protocol/method
+
+**Step 3: Provide user with import instructions**
+Since we cannot programmatically add shapes to FigJam, instruct the user:
+
+```
+📋 FigJam Setup Instructions:
+
+1. Open the created FigJam file: {figjam_url}
+2. File → Import → Select the generated .excalidraw files:
+   • system-architecture.excalidraw
+   • data-model.excalidraw
+   • timeline.excalidraw
+3. The diagrams will import with all shapes, text, colors, and arrows preserved.
+4. Arrange the imported diagrams on the FigJam canvas as needed.
+5. For Mermaid diagrams (api-flow.mmd, state-machine.mmd):
+   • Use Mermaid Live Editor (mermaid.live) to render
+   • Screenshot and paste into FigJam, OR
+   • Use the Mermaid FigJam plugin (if available)
+```
+
+**Diagram Types to Generate**:
+
+| Diagram | Format | FigJam Import | Content |
+|---------|--------|---------------|---------|
+| **System Architecture** | `.excalidraw` | ✅ Drag & drop | Components, services, data flow |
+| **Data Model / ERD** | `.excalidraw` | ✅ Drag & drop | Entities, relationships, cardinalities |
+| **API Flow** | `.mmd` (Mermaid) | ⚠️ Screenshot/plugin | Request lifecycle, service interactions |
+| **State Machine** | `.mmd` (Mermaid) | ⚠️ Screenshot/plugin | Feature states and transitions |
+| **Implementation Timeline** | `.excalidraw` | ✅ Drag & drop | Gantt-style phase breakdown |
+
+**FigJam Naming Convention**:
+```
+📁 TDD-042: User Export Feature
+  ├── 📝 TDD v1.0.0 (PRD v2.1.0) — System Architecture
+  ├── 📝 TDD v1.0.0 (PRD v2.1.0) — Data Model
+  ├── 📝 TDD v1.0.0 (PRD v2.1.0) — Implementation Timeline
+  └── 📝 TDD v1.1.0 (PRD v2.2.0) — Delta Diagrams
+```
 
 **Output Artifacts**:
+- FigJam file URL(s)
 - `diagrams/system-architecture.excalidraw`
 - `diagrams/data-model.excalidraw`
 - `diagrams/api-flow.mmd`
 - `diagrams/state-machine.mmd`
 - `diagrams/timeline.excalidraw`
-
-**FigJam Upload** (if FIGMA_TOKEN provided):
-1. Create new FigJam file via Figma API: `POST /v1/files`
-2. Name it: `TDD-{PRD_ID}-v{X.Y.Z} (PRD v{A.B.C})`
-3. Unfortunately, Figma REST API does not support adding shapes to FigJam files programmatically
-4. **Workaround**: Provide user with:
-   - Direct FigJam file URL (empty canvas)
-   - Instructions to import `.excalidraw` files via drag-and-drop
-   - Pre-generated diagram images (PNG/SVG) as fallback
 
 ---
 
@@ -408,7 +384,7 @@ Since FigJam does not have a public API for programmatic creation, use this appr
 
 **Objective**: Maintain the permanent 1:1 mapping between PRD versions and TDD versions.
 
-**Registry File**: `version-registry.json` (stored in output directory)
+**Registry File**: `version-registry.json` (stored locally, can be committed to repo)
 
 ```json
 {
@@ -426,14 +402,13 @@ Since FigJam does not have a public API for programmatic creation, use this appr
       "tdd": {
         "version": "1.0.0",
         "status": "draft",
-        "file_path": "./tech-designs/TDD-042-v1.0.0.md",
+        "notion_url": "https://notion.so/...",
         "figjam_url": "https://figma.com/file/...",
-        "diagrams_path": "./tech-designs/diagrams/"
+        "local_backup": "./backups/TDD-042-v1.0.0.md"
       },
       "github_analysis": {
         "repo": "org/backend-service",
-        "commit": "abc123",
-        "analysis_file": "./tech-designs/github-analysis.json"
+        "commit": "abc123"
       },
       "created_at": "2026-06-23T08:50:00Z",
       "updated_at": "2026-06-23T08:50:00Z",
@@ -450,7 +425,7 @@ Since FigJam does not have a public API for programmatic creation, use this appr
 - Always update `last_updated` timestamp
 
 **Notion Backlink** (optional, if NOTION_TOKEN has write access):
-- Update the PRD page with a link to the generated TDD file
+- Update the PRD page with a link to the generated TDD Notion page
 - Add a `Technical Design` relation property if the database supports it
 
 ---
@@ -465,28 +440,33 @@ Since FigJam does not have a public API for programmatic creation, use this appr
 **Mapping**: PRD v{A.B.C} → TDD v{X.Y.Z}
 
 ### Generated Artifacts
-| Artifact | Location |
-|----------|----------|
-| TDD Document | `{output_dir}/TDD-{PRD_ID}-v{X.Y.Z}.md` |
-| PRD Extract | `{output_dir}/prd-extract.json` |
-| GitHub Analysis | `{output_dir}/github-analysis.json` |
-| System Architecture Diagram | `{output_dir}/diagrams/system-architecture.excalidraw` |
-| Data Model Diagram | `{output_dir}/diagrams/data-model.excalidraw` |
-| API Flow Diagram | `{output_dir}/diagrams/api-flow.mmd` |
-| State Machine | `{output_dir}/diagrams/state-machine.mmd` |
-| Implementation Timeline | `{output_dir}/diagrams/timeline.excalidraw` |
-| Version Registry | `{output_dir}/version-registry.json` |
+| Artifact | Location | Link |
+|----------|----------|------|
+| TDD Document | Notion | [Open in Notion]({notion_tdd_url}) |
+| PRD Extract | Local | `./prd-extract.json` |
+| GitHub Analysis | Local | `./github-analysis.json` |
+| System Architecture Diagram | FigJam + Excalidraw | [FigJam]({figjam_url}) / [Download .excalidraw]({path}) |
+| Data Model Diagram | FigJam + Excalidraw | [FigJam]({figjam_url}) / [Download .excalidraw]({path}) |
+| API Flow Diagram | Mermaid | `./diagrams/api-flow.mmd` |
+| State Machine | Mermaid | `./diagrams/state-machine.mmd` |
+| Implementation Timeline | FigJam + Excalidraw | [FigJam]({figjam_url}) / [Download .excalidraw]({path}) |
+| Version Registry | Local | `./version-registry.json` |
+| TDD Backup | Local | `./backups/TDD-{PRD_ID}-v{X.Y.Z}.md` |
 
-### FigJam
-- **File URL**: {figjam_url or "Create manually and import .excalidraw files"}
+### FigJam Setup
+- **FigJam File**: {figjam_url}
 - **Naming**: `TDD-{PRD_ID}-v{X.Y.Z} (PRD v{A.B.C})`
+- **Import Steps**:
+  1. Open FigJam file
+  2. File → Import → Select `.excalidraw` files from `./diagrams/`
+  3. Arrange diagrams on canvas
 
 ### Next Steps
-1. [ ] Review TDD document for accuracy
+1. [ ] Review TDD in Notion for accuracy
 2. [ ] Import `.excalidraw` files into FigJam
-3. [ ] Share with engineering team for review
-4. [ ] Update status to "In Review" in version registry
-5. [ ] Once approved, update status to "Approved" and begin implementation
+3. [ ] Share Notion TDD with engineering team for review
+4. [ ] Update TDD `Status` to "In Review" in Notion
+5. [ ] Once approved, update `Status` to "Approved" and begin implementation
 
 ### Version History
 {Show mapping lineage if this is an update}
@@ -501,11 +481,17 @@ This skill bundles helper scripts in the `scripts/` directory:
 ### `scripts/notion-extract.py`
 Extracts PRD data from Notion API and outputs structured JSON.
 
+### `scripts/notion-tdd-creator.py`
+Creates a new TDD page in a Notion database with rich content blocks (headings, tables, code, callouts).
+
 ### `scripts/github-analyzer.py`
 Analyzes a GitHub repository and produces architecture analysis JSON.
 
 ### `scripts/diagram-generator.py`
 Generates Excalidraw and Mermaid diagram files from TDD content.
+
+### `scripts/figjam-creator.py`
+Creates FigJam files via Figma API and returns shareable URLs.
 
 ### `scripts/registry-manager.py`
 Manages the version registry JSON file.
@@ -517,7 +503,7 @@ Manages the version registry JSON file.
 ## Reference Files
 
 - `reference/notion-api-cheatsheet.md` — Notion API endpoints and property types
-- `reference/figma-api-cheatsheet.md` — Figma REST API endpoints
+- `reference/figma-api-cheatsheet.md` — Figma REST API endpoints for FigJam creation
 - `reference/excalidraw-format.md` — Excalidraw JSON schema for programmatic generation
 - `reference/versioning-semver.md` — SemVer rules for PRD/TDD versioning
 
@@ -527,16 +513,19 @@ Manages the version registry JSON file.
 
 Before marking a TDD as complete, verify:
 
-- [ ] Every PRD requirement (P0, P1) has a corresponding technical approach
+- [ ] Every PRD requirement (P0, P1) has a corresponding technical approach in Notion
 - [ ] GitHub analysis informed all architectural decisions
 - [ ] All diagrams include version watermark
-- [ ] Version registry has been updated
-- [ ] Delta section exists if this is a version update
-- [ ] Open questions are explicitly listed, not hidden
+- [ ] Version registry has been updated with Notion and FigJam URLs
+- [ ] Delta section exists in Notion if this is a version update
+- [ ] Open questions are explicitly listed in Notion, not hidden
 - [ ] Rollback plan is concrete, not generic
 - [ ] Estimates include buffer for unknowns
-- [ ] Security considerations are addressed
-- [ ] Breaking changes are flagged prominently
+- [ ] Security considerations are addressed in Notion
+- [ ] Breaking changes are flagged prominently in Notion
+- [ ] Notion TDD page has correct `Version` property
+- [ ] Notion TDD page is linked back to parent PRD
+- [ ] FigJam file was created and URL stored in registry
 
 ---
 
@@ -545,12 +534,14 @@ Before marking a TDD as complete, verify:
 | Scenario | Action |
 |----------|--------|
 | Notion API returns 404 | Ask user to verify PRD URL and NOTION_TOKEN permissions |
+| Notion TDD database missing | Ask user to create a database with required properties (Name, Version, Status, PRD, etc.) |
 | GitHub repo not accessible | Check GITHUB_TOKEN scope; ask user for access or use public repo |
 | PRD has no version | Prompt user for version; default to 1.0.0 if they decline |
-| Version already mapped | Show existing TDD; ask: update, branch, or skip |
-| Figma token missing | Skip auto-upload; provide manual import instructions |
+| Version already mapped | Show existing TDD Notion URL; ask: update, branch, or skip |
+| Figma token missing | Skip auto-creation; provide manual FigJam creation instructions |
 | Large repo (>1GB) | Use shallow clone (`--depth 1`); warn user analysis may be incomplete |
 | PRD content is unstructured | Use heuristics to extract requirements; warn user and ask for manual review |
+| Notion block limit exceeded | Notion has a 100 block limit per request; paginate if needed |
 
 ---
 
@@ -558,7 +549,7 @@ Before marking a TDD as complete, verify:
 
 The full skill body loads on activation. Reference files load only when:
 - Notion API issues → load `reference/notion-api-cheatsheet.md`
-- Figma upload issues → load `reference/figma-api-cheatsheet.md`
+- Figma/FigJam issues → load `reference/figma-api-cheatsheet.md`
 - Diagram generation issues → load `reference/excalidraw-format.md`
 - Version conflicts → load `reference/versioning-semver.md`
 
@@ -566,12 +557,14 @@ The full skill body loads on activation. Reference files load only when:
 
 ## Example Invocation
 
-**User**: "Create a tech design for PRD-042 from Notion. The repo is github.com/org/backend. I want diagrams in FigJam."
+**User**: "Create a tech design for PRD-042 from Notion. The repo is github.com/org/backend. Save the TDD in Notion and diagrams in FigJam."
 
 **Claude** (activates this skill):
 1. "I'll create a Technical Design Document for PRD-042. Let me check for required environment variables..."
-2. "Found NOTION_TOKEN and GITHUB_TOKEN. Fetching PRD from Notion..."
+2. "Found NOTION_TOKEN, NOTION_TDD_DATABASE_ID, GITHUB_TOKEN, and FIGMA_TOKEN. Fetching PRD from Notion..."
 3. "PRD v2.1.0 detected. No existing mapping found. Proceeding with fresh TDD v1.0.0."
 4. "Analyzing github.com/org/backend @ main..."
-5. "Generating TDD, diagrams, and updating version registry..."
-6. "Done! Here's your complete design package..."
+5. "Creating TDD page in Notion database..."
+6. "Creating FigJam file and generating diagrams..."
+7. "Updating version registry..."
+8. "Done! Here's your complete design package..."
